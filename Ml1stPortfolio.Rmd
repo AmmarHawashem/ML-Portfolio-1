@@ -1,0 +1,373 @@
+---
+title: "Pima Indians Diabetes"
+author: "Ammar Al-Hawashem"
+date: "16/10/2021"
+df_print: paged
+output: 'rmdformats::material'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## **Part1: Introduction**
+
+## What is the project?
+A population of women who were at least 21 years old, of Pima Indian heritage and living near Phoenix, Arizona, was tested for diabetes according to World Health Organization criteria.
+The data were collected by the US National Institute of Diabetes and Digestive and Kidney Diseases and published in 1988.
+
+
+ Information  | Description
+-------- | -------------
+Problem type  | Supervised binary classification
+Response variable  | Diabetes positive or negative response (i.e. “pos,” “neg”)
+Features| 8
+Observations | 768
+Objective | Use biological attributes to predict the presence of diabetes
+
+## What are the features and the target?
+ Variable  | Description
+-------- | -------------
+pregnant  | Number of times pregnant
+glucose | Plasma glucose concentration (glucose tolerance test)
+pressure | Diastolic blood pressure (mm Hg)
+triceps | Triceps skin fold thickness (mm)
+insulin | 2-Hour serum insulin (mu U/ml)
+mass | Body mass index (weight in kg/(height in m^2))
+pedigree | Diabetes pedigree function
+age | Age (years)
+diabetes | Class variable (test for diabetes)
+
+## **Part2: Set-up**
+### Install used libraries
+In addition to the necessary libraries (tidyverse & tidymodel)m you may want to install the below libraries:
+```{r, echo = TRUE, eval = FALSE}
+install.packages("corrplot") #for visualization
+install.packages("themis")   #for step_smote()  --> up-sampling
+install.packages("ranger")   #for random forest model
+```
+### Load the necessary libraries
+```{r}
+library(tidyverse)
+library(tidymodels)
+library(visdat)
+library(naniar)
+library(GGally)
+library(corrplot)
+library(themis) 
+library(ranger)
+library(knitr)
+```
+
+### Set-up
+Let's Load the  dataset to our environment: 
+```{r}
+pima <- readr::read_csv("data/pima.csv")
+pima
+```
+
+## **Part3: Pre-work**
+I Always like to use skimr::skim() to give me great view of the data: `r skimr::skim(pima)`
+
+
+## **Part4: Exercises**
+
+###1- Assess the distribution of the target / response variable.
+
+#### A- Is the response skewed?
+Before we answer, we should convert it is type from character into factor:
+```{r}
+pima$diabetes = as.factor(pima$diabetes)
+```
+Now let's check its distribuation:
+```{r}
+ggplot(pima, aes(x=diabetes, fill= diabetes)) +
+  geom_bar() +
+  labs(title = "Frequency Vs Presence of Diabetes") +
+  theme_bw()
+```
+```{r}
+sum(pima$diabetes == "neg")/sum(pima$diabetes == "pos") 
+```
+It can be notuced that the number of negative cases are almost double the positive once (which is expected). Therfore, we have a skewed target
+
+
+#### B- Does applying a transformation normalize the distribution?
+Since we have imbalance data with  relatively small number of observation (<800). I'll do up-sampling for the positive cases.
+
+### 2- Assess the dataset for missingness.
+
+#### A- How many observations have missing values?
+
+```{r echo=FALSE}
+skimr::skim(pima)
+```
+
+As part 3, you can notice that fortunately there are no missing values. However, 6 out of the 8 features have zero values.
+
+The question is: are these zeros are informative or missingness at random?
+The answer is: It is informative just in the "pregnant column" and the rest are considered as missingness at random.
+Therefore, let's convert these zeros into 'na'
+
+a- Let's excu;de the feature with the informative zero
+```{r}
+pima %>% 
+  select(-pregnant)  -> pima_na
+pima_na
+```
+b- Let's convert the zeros into NA's
+```{r}
+  replace_with_na_all(data = pima_na, condition = ~.  ==0) ->pima_na
+pima_na
+```
+c- Let's mutate the pregnant feature
+```{r}
+pima_na %>% 
+  mutate(pregnant = pima$pregnant) -> pima_na
+pima_na
+```
+Let's go back to the question
+#### B- How many observations have missing values?
+```{r}
+skimr::skim(pima_na)
+```
+As you can see, we are able to define the number of missingness at random for each feature.
+
+#### B- Plot the missing values. Does there appear to be any patterns to the missing values?
+Here is a great way to check the quality of the observations that have a missing value
+```{r}
+pima_na %>% 
+  select(glucose, pressure, triceps, , insulin, , pedigree) %>% 
+  gg_miss_upset()
+```
+As you can see, just 33 observations have 3 missings features . Due to the small number of observation we will keep them. Also, the insulin is missed in almost half of the data
+
+#### C- How do you think the different imputation approaches would impact modeling results?
+They will improve it. However, there is no uniform procedure for the imputation that can be applied for all cases 
+
+### 3- Assess the variance across the features.
+#### A- Do any features have zero variance?
+From the data summary skimr::skim(), we didn't have any feature with standard deviation = 0, As a result, no variance as well since squired root of zero is zero
+#### B- Do any features have near-zero variance?
+Let's check for "pedigree" since it has a small sd:
+
+```{r}
+pima_na %>% 
+  summarise(variance_pedigree = var(pedigree))
+```
+So it is near zero
+
+### 4- Assess the numeric features.
+There are two great visualization that can be used. However, we need to omit the NA values firstly
+```{r}
+na.omit(pima_na) ->pima_NoNa 
+pima_NoNa
+```
+The first useful visualization
+```{r}
+  ggscatmat(data = pima_NoNa, , color = "diabetes", alpha = 0.7)
+```
+The second plot is a Correlation matrix plot
+``` {r}
+ select(pima_NoNa, -diabetes) -> correlationM
+corr = cor(correlationM)
+ corrplot(corr)
+```
+ 
+You can notice that pregnant & age have a high correlation value whcih is expected
+
+#### A- Do some features have significant skewness?
+They all have except the pressure feature
+
+#### B- Do features have a wide range of values that would benefit from standardization?
+
+
+```{r}
+skimr::skim(pima_na)
+```
+There are a wide range, so normliazation sounds useful
+
+
+### 5- Assess the categorical features.
+We don't have any
+
+### 6- Execute a basic feature engineering process.
+#### A-apply a KNN model to your data without pre-applying feature engineering processes.
+
+Let's split our data into training and testing sets: I'll use stratified sampling to preserve the distribution since we have almost double negative cases
+
+NOTE: we use here the original data with the zeros
+```{r}
+set.seed(1234)
+initial_split(data = pima_NoNa, strata = diabetes) -> pima_NoNa_split
+training(pima_NoNa_split) -> pima_NoNa_train
+testing(pima_NoNa_split) -> pima_NoNa_test
+```
+
+ We are going to use resampling to evaluate model performance, so let’s get those resample sets ready.
+```{r}
+set.seed(1234)
+pima_folds <- vfold_cv(pima_NoNa_train, strata = diabetes, repeats = 5)
+pima_folds
+```
+
+########### FROM HERE 
+Build  models without a recipe:
+
+Specify the model
+```{r}
+pima_rec_before <- recipe(diabetes~ ., data= pima_NoNa_train)
+```
+
+ Then fit it
+```{r}
+pima_rec_before %>%
+  prep()
+```
+
+
+
+
+
+```{r}
+knn_spec_before <- nearest_neighbor() %>%
+  set_engine("kknn") %>%
+  set_mode("classification")
+```
+
+
+
+ Add the recipe and the model to the workshop
+```{r}
+pima_wf <- workflow() %>% 
+  add_recipe(pima_rec_before) %>% 
+  add_model(knn_spec_before)
+pima_wf
+```
+
+```{r}
+pima_wf %>% 
+  fit_resamples(
+    resamples = pima_folds,
+    metrics = metric_set( roc_auc, accuracy, sensitivity, specificity),
+    control = control_resamples(save_pred = TRUE) #so they can be used in plotting
+  ) -> knn_rs_before
+```
+Evaluate models
+
+```{r}
+collect_metrics(knn_rs_before)
+
+```
+```{r}
+knn_rs_before %>% 
+  conf_mat_resampled()
+```
+
+
+ Let's fit one more time to the training data and evaluate on the testing data using the function last_fit().
+```{r}
+pima_final_before <- pima_wf %>%
+  last_fit(pima_NoNa_split,
+           metrics = metric_set( roc_auc, accuracy, sensitivity, specificity),
+  )
+```
+
+ The metrics and predictions here are on the testing data:
+```{r}
+collect_metrics(pima_final_before)
+```
+
+
+NOTE: we use here the  data with the NA's
+```{r}
+
+set.seed(1234)
+initial_split(data = pima_na, strata = diabetes) -> pima_split
+training(pima_split) -> pima_train
+testing(pima_split) -> pima_test
+```
+
+
+```{r}
+set.seed(1234)
+pima_folds_after <- vfold_cv(pima_train, strata = diabetes, repeats = 5)
+pima_folds_after
+```
+
+
+ Prepare the recipe with the feature engineering
+ 
+```{r}
+pima_rec_after <- recipe(diabetes~ ., data= pima_train) %>% 
+  step_zv(all_numeric()) %>% 
+  step_nzv(all_numeric()) %>% 
+  step_impute_mean(glucose) %>% 
+  step_impute_mean(pressure) %>% 
+  step_impute_knn(all_predictors()) %>%
+  step_normalize(all_numeric()) %>% 
+  step_smote(diabetes)
+
+
+```
+
+The same specification
+```{r}
+knn_spec_before <- nearest_neighbor() %>%
+  set_engine("kknn") %>%
+  set_mode("classification")
+```
+
+ Add the recipe to the workshop
+```{r}
+pima_wf <- workflow() %>% 
+  add_recipe(pima_rec_after) %>% 
+  add_model(knn_spec_before)
+pima_wf
+```
+
+
+```{r}
+pima_wf %>% 
+  fit_resamples(
+    resamples = pima_folds_after,
+    metrics = metric_set( roc_auc, accuracy, sensitivity, specificity),
+    control = control_resamples(save_pred = TRUE) #so they can be used in plotting
+  ) -> knn_rs_after
+```
+
+```{r}
+collect_metrics(knn_rs_after)
+
+```
+
+```{r}
+knn_rs_before %>% 
+  conf_mat_resampled()
+```
+
+ Let's fit one more time to the training data and evaluate on the testing data using the function last_fit().
+```{r}
+pima_final_after <- pima_wf %>% 
+  last_fit(pima_split,
+           metrics = metric_set( roc_auc, accuracy, sensitivity, specificity),
+  )
+  
+```
+The metrics and predictions here are on the testing data:
+``` {r}
+collect_metrics(pima_final_after)
+```
+ It gave simillar results
+```{r}
+collect_predictions(pima_final_after) 
+```
+``` {r}
+collect_predictions(pima_final_after) %>% 
+  conf_mat(diabetes, .pred_class)
+```
+
+
+
+
